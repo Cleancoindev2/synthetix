@@ -9,6 +9,7 @@ const Synthetix = artifacts.require('Synthetix');
 const SynthetixState = artifacts.require('SynthetixState');
 const Synth = artifacts.require('Synth');
 const AddressResolver = artifacts.require('AddressResolver');
+const Exchanger = artifacts.require('Exchanger');
 
 const {
 	currentTime,
@@ -43,7 +44,9 @@ contract('Synthetix', async accounts => {
 		sEURContract,
 		oracle,
 		timestamp,
-		addressResolver;
+		exchanger,
+		addressResolver,
+		waitingPeriodSecs;
 
 	// Updates rates with defaults so they're not stale.
 	const updateRatesWithDefaults = async () => {
@@ -59,6 +62,11 @@ contract('Synthetix', async accounts => {
 		);
 	};
 
+	async function fastForwardAndUpdateRates(seconds) {
+		fastForward(seconds);
+		updateRatesWithDefaults();
+	}
+
 	async function getRemainingIssuableSynths(account) {
 		const result = await synthetix.remainingIssuableSynths(account);
 		return result[0];
@@ -73,6 +81,7 @@ contract('Synthetix', async accounts => {
 		supplySchedule = await SupplySchedule.deployed();
 		escrow = await Escrow.deployed();
 		rewardEscrow = await RewardEscrow.deployed();
+		exchanger = await Exchanger.deployed();
 
 		synthetix = await Synthetix.deployed();
 		synthetixState = await SynthetixState.deployed();
@@ -82,6 +91,7 @@ contract('Synthetix', async accounts => {
 		sBTCContract = await Synth.at(await synthetix.synths(sBTC));
 
 		addressResolver = await AddressResolver.deployed();
+		waitingPeriodSecs = await exchanger.waitingPeriodSecs();
 
 		// Send a price update to guarantee we're not stale.
 		oracle = await exchangeRates.oracle();
@@ -2331,10 +2341,11 @@ contract('Synthetix', async accounts => {
 									toContract: iBTCContract,
 								});
 							});
-							describe('when the user tries to exchange some iBTC into another synth', () => {
+							describe.only('when the user tries to exchange some iBTC into another synth', () => {
 								const newAmountExchanged = toUnit(0.003); // current iBTC balance is a bit under 0.05
 
 								beforeEach(async () => {
+									await fastForwardAndUpdateRates(waitingPeriodSecs + 1);
 									exchangeTxns.push(
 										await synthetix.exchange(iBTC, newAmountExchanged, sAUD, {
 											from: account1,
@@ -2400,11 +2411,12 @@ contract('Synthetix', async accounts => {
 									});
 								});
 							});
-							describe('doubling of fees for swing trades', () => {
+							describe.only('doubling of fees for swing trades', () => {
 								const iBTCexchangeAmount = toUnit(0.002); // current iBTC balance is a bit under 0.05
 								let txn;
 								describe('when the user tries to exchange some short iBTC into long sBTC', () => {
 									beforeEach(async () => {
+										await fastForwardAndUpdateRates(waitingPeriodSecs + 1);
 										txn = await synthetix.exchange(iBTC, iBTCexchangeAmount, sBTC, {
 											from: account1,
 										});
@@ -2421,6 +2433,7 @@ contract('Synthetix', async accounts => {
 									});
 									describe('when the user tries to exchange some short iBTC into sEUR', () => {
 										beforeEach(async () => {
+											await fastForwardAndUpdateRates(waitingPeriodSecs + 1);
 											txn = await synthetix.exchange(iBTC, iBTCexchangeAmount, sEUR, {
 												from: account1,
 											});
@@ -2440,6 +2453,7 @@ contract('Synthetix', async accounts => {
 											let prevBalance;
 											beforeEach(async () => {
 												prevBalance = await iBTCContract.balanceOf(account1);
+												await fastForwardAndUpdateRates(waitingPeriodSecs + 1);
 												txn = await synthetix.exchange(sEUR, sEURExchangeAmount, iBTC, {
 													from: account1,
 												});
@@ -2463,6 +2477,7 @@ contract('Synthetix', async accounts => {
 
 									beforeEach(async () => {
 										prevBalance = await sUSDContract.balanceOf(account1);
+										await fastForwardAndUpdateRates(waitingPeriodSecs + 1);
 										txn = await synthetix.exchange(iBTC, iBTCexchangeAmount, sUSD, {
 											from: account1,
 										});
